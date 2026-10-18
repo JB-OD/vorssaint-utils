@@ -1401,6 +1401,11 @@ MUTATIONS = [
      "return number == displayID || number == sharedScreenID || number == mirroredID",
      "return number == displayID",
      "a mirroring display's brightness overlay shows on the screen its mirror set shares"),
+    ("new wheel input keeps the previous pane's glide budget", "pointer-input",
+     "Sources/Vorssaint/Services/SmoothScrollService.swift",
+     "|| glideFromContinuous != traits.isContinuous || retargeted {",
+     "|| glideFromContinuous != traits.isContinuous {",
+     "fresh input in another pane drops the old tail and fractional carry immediately"),
 ]
 
 
