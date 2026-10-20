@@ -129,6 +129,15 @@ enum SmoothScrollRoutingTests {
         _ = tick(service, wheel())
         suite.expectClose(service.engine.remainingVertical, remaining + 40,
                           "new input at the same target extends the remaining distance")
+        let drifted = service.engine.remainingVertical
+        _ = tick(service, wheel(CGPoint(x: a.x + 1, y: a.y + 1)))
+        _ = tick(service, wheel(CGPoint(x: a.x + 6, y: a.y)))
+        suite.expectClose(service.engine.remainingVertical, drifted + 80,
+                          "a pointer drifting a few points between ticks keeps the glide it is extending")
+        _ = tick(service, wheel(CGPoint(x: a.x + 6 + SmoothScrollSupport.TargetLatch.driftTolerance + 1, y: a.y)))
+        suite.expect(service.engine.remainingVertical == 40,
+                     "a pointer that moved past the drift tolerance starts a new glide")
+        _ = tick(service, wheel())
         service.carryVertical = 0.7
         _ = tick(service, wheel(b))
         suite.expect(service.engine.remainingVertical == 40 && service.carryVertical == 0,
@@ -239,5 +248,13 @@ enum SmoothScrollRoutingTests {
         }
         suite.expect(ScrollWheelSupport.tapLocation == .cgAnnotatedSessionEventTap,
                      "wheel routing starts after the window server identifies its receiver")
+        // That stage comes after the session taps that keep the wheel for
+        // themselves, so they turn it the way Scroll Direction would.
+        let layout = (try? String(contentsOfFile: "Sources/Vorssaint/Services/WindowLayout/WindowLayoutService.swift",
+                                  encoding: .utf8)) ?? ""
+        suite.expect(layout.contains("let wheel = ScrollInverter.directionApplied(to: event)")
+                && layout.contains("let deltaY = wheel.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)")
+                && layout.contains("let fixedDeltaY = wheel.getIntegerValueField(.scrollWheelEventDeltaAxis1)"),
+                     "the directional window gesture reads the wheel the way Scroll Direction turns it")
     }
 }

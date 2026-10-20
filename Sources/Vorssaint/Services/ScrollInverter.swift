@@ -32,6 +32,31 @@ final class ScrollInverter: ObservableObject {
     /// This process's own id, compared against the one every event carries.
     private static let ownProcessID = Int64(getpid())
 
+    /// The wheel the way this tap would turn it, for this app's session taps:
+    /// they run before this tap and consume the wheel, so it never comes here.
+    /// Only the flip, on a copy; anything that is not a mouse wheel, or sits
+    /// over an app excepted from Scroll Direction, comes back as it was.
+    static func directionApplied(to event: CGEvent) -> CGEvent {
+        let traits = ScrollWheelEventTraits(
+            isContinuous: event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0,
+            momentumPhase: event.getIntegerValueField(.scrollWheelEventMomentumPhase),
+            scrollPhase: event.getIntegerValueField(.scrollWheelEventScrollPhase),
+            scrollCount: event.getIntegerValueField(.scrollWheelEventScrollCount)
+        )
+        let direction = ScrollDirectionPreferences(defaults: .standard)
+        guard direction.invertVertical || direction.invertHorizontal,
+              ScrollWheelSupport.isMouseWheel(traits, secondsSinceLastGesturePhase: nil),
+              !MouseAppExceptions.shared.excludesPointerTarget(
+                  .scrollDirection, at: event.location,
+                  sourceProcessID: event.getIntegerValueField(.eventSourceUnixProcessID)),
+              let turned = event.copy() else { return event }
+        ScrollWheelSupport.applyDirection(to: turned, isContinuous: traits.isContinuous,
+                                          invertVertical: direction.invertVertical,
+                                          invertHorizontal: direction.invertHorizontal,
+                                          horizontalModifier: nil)
+        return turned
+    }
+
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     /// Guards the two above: the callback runs on the pointer thread while the
