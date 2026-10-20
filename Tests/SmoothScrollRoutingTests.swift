@@ -40,6 +40,13 @@ enum SmoothScrollRoutingTests {
         static func claimsSideWheel<T>(_ input: T, at point: CGPoint, sourceProcessID: Int64,
                                        eventTimestamp: UInt64) -> Bool { false }
     }
+    /// Whether the event came in at the HID stage; false stands for a remote
+    /// screen's scroll, posted further down.
+    final class HIDStage {
+        static let shared = HIDStage()
+        var passes = true
+        func passed(_ event: CGEvent) -> Bool { passes }
+    }
     final class Service {
         typealias UserDefaults = DefaultsStore
         typealias MouseAppExceptions = Exceptions
@@ -49,6 +56,7 @@ enum SmoothScrollRoutingTests {
         typealias SessionActivity = Session
         typealias ScreenshotSelectionController = Capture
         typealias MouseButtonShortcutService = Shortcuts
+        typealias ScrollWheelHIDStage = HIDStage
         // Test events carry the harness pid; the real service rejects its own.
         static let ownProcessID: Int64 = -1
         var tap: CFMachPort?
@@ -82,6 +90,7 @@ enum SmoothScrollRoutingTests {
         defer {
             defaults.removePersistentDomain(forName: domain)
             Exceptions.shared.scopes = []
+            HIDStage.shared.passes = true
             posted = []
         }
         let a = CGPoint(x: 120, y: 240), b = CGPoint(x: 900, y: 600)
@@ -158,6 +167,37 @@ enum SmoothScrollRoutingTests {
         suite.expect(!service.engine.isActive && !service.scheduled && service.targetEvent == nil
                 && service.targetLatch.target == nil && posted.count == stoppedCount,
                      "stopping a glide clears routing and a late frame cannot deliver it")
+
+        // Screen Sharing posts the controlling computer's scroll, trackpad
+        // included, at the session tap as phaseless pixel events.
+        let local = Service()
+        _ = tick(local, wheel())
+        let localBudget = local.engine.remainingVertical
+        HIDStage.shared.passes = false
+        let remote = wheel(b, pid: 42, window: 202)
+        remote.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        remote.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: 4)
+        remote.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: 40)
+        suite.expect(tick(local, remote) === remote
+                && remote.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == 40
+                && local.engine.remainingVertical == localBudget && local.scheduled
+                && local.targetLatch.target?.point == a,
+                     "a remote screen's scroll passes through raw and leaves the local glide on its window")
+        HIDStage.shared.passes = true
+
+        var ledger = ScrollWheelHIDStageLedger()
+        suite.expect(ledger.passed(12) && ledger.passed(0),
+                     "with no HID tap watching, every wheel event counts as local")
+        ledger.isWatching = true
+        ledger.note(12)
+        suite.expect(ledger.passed(12) && !ledger.passed(13) && !ledger.passed(0),
+                     "while the HID tap watches, only events it noted count as local")
+        let capacity = UInt64(ScrollWheelHIDStageLedger.capacity)
+        for timestamp in 100..<(100 + capacity) { ledger.note(timestamp) }
+        suite.expect(!ledger.passed(12) && ledger.passed(100) && ledger.passed(99 + capacity),
+                     "the HID stage ledger keeps the last \(capacity) events, oldest out first")
+        ledger.reset()
+        suite.expect(ledger.passed(13), "a watch that was torn down counts every event as local again")
 
         for event in [wheel(pid: 0), wheel(window: 0)] {
             let unknown = Service()
@@ -248,6 +288,19 @@ enum SmoothScrollRoutingTests {
         }
         suite.expect(ScrollWheelSupport.tapLocation == .cgAnnotatedSessionEventTap,
                      "wheel routing starts after the window server identifies its receiver")
+        // A listener is told asynchronously and could note an event after it
+        // already reached the wheel taps; an active tap holds it until then.
+        let stage = (try? String(contentsOfFile: "Sources/Vorssaint/Services/ScrollWheelHIDStage.swift",
+                                 encoding: .utf8)) ?? ""
+        suite.expect(stage.contains("tap: .cghidEventTap") && stage.contains("options: .defaultTap"),
+                     "the HID stage is watched by an active HID tap, so its note is in before the event moves on")
+        let smooth = (try? String(contentsOfFile: "Sources/Vorssaint/Services/SmoothScrollService.swift",
+                                  encoding: .utf8)) ?? ""
+        let inverter = (try? String(contentsOfFile: "Sources/Vorssaint/Services/ScrollInverter.swift",
+                                    encoding: .utf8)) ?? ""
+        suite.expect(smooth.contains("ScrollWheelHIDStage.shared.setWatching(true, for: .smoothScroll)")
+                && inverter.contains("ScrollWheelHIDStage.shared.setWatching(true, for: .wheelTap)"),
+                     "both wheel taps keep the HID stage watched while they run")
         // That stage comes after the session taps that keep the wheel for
         // themselves, so they turn it the way Scroll Direction would.
         let layout = (try? String(contentsOfFile: "Sources/Vorssaint/Services/WindowLayout/WindowLayoutService.swift",

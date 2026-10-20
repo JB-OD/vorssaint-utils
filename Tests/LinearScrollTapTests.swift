@@ -25,11 +25,18 @@ enum LinearScrollTapTests {
         static let shared = Session()
         let isActive = true
     }
+    /// False stands for a remote screen's scroll, posted below the HID stage.
+    final class HIDStage {
+        static let shared = HIDStage()
+        var passes = true
+        func passed(_ event: CGEvent) -> Bool { passes }
+    }
     final class Inverter {
         typealias UserDefaults = StandardDefaults
         typealias MouseAppExceptions = Exceptions
         typealias ScrollWheelTarget = Target
         typealias SessionActivity = Session
+        typealias ScrollWheelHIDStage = HIDStage
         // Events built here carry this process's id, which the shipped tap
         // skips as its own glide frames.
         static let ownProcessID: Int64 = -1
@@ -47,6 +54,7 @@ enum LinearScrollTapTests {
         defer {
             defaults.removePersistentDomain(forName: name)
             Exceptions.shared.excepted = []
+            HIDStage.shared.passes = true
         }
         func configure(linear: Bool = true, installed: Bool = true, lines: Int = 3,
                        invert: Bool = false, inverterInstalled: Bool = true,
@@ -167,6 +175,37 @@ enum LinearScrollTapTests {
         trackpad.setIntegerValueField(.scrollWheelEventScrollPhase, value: 1)
         suite.expect(deliver(trackpad)?.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == 40,
                      "a trackpad gesture passes through untouched")
+
+        // Screen Sharing posts the controlling computer's scroll below the
+        // HID stage as phaseless pixel events, already turned its way.
+        configure(invert: true)
+        let local = Inverter()
+        _ = deliver(wheel(line: 0, fixed: 0.25, point: 0), through: local)
+        let carried = local.linearCarryVertical
+        HIDStage.shared.passes = false
+        let remote = wheel(continuous: true, line: 0, fixed: 4, point: 40)
+        suite.expect(deliver(remote, through: local) === remote
+                        && remote.getIntegerValueField(.scrollWheelEventPointDeltaAxis1) == 40
+                        && verticalFixed(remote) == 4 && local.linearCarryVertical == carried,
+                     "a remote screen's scroll is neither capped nor turned, and leaves the local carry alone")
+        HIDStage.shared.passes = true
+
+        // The session taps that keep the wheel read it through this copy.
+        configure(invert: true)
+        let notch = wheel(line: 2, fixed: 2, point: 20)
+        let turned = Inverter.directionApplied(to: notch)
+        suite.expect(turned !== notch && verticalLine(turned) == -2 && verticalLine(notch) == 2,
+                     "session taps read a local wheel turned the way Scroll Direction turns it, on a copy")
+        HIDStage.shared.passes = false
+        suite.expect(Inverter.directionApplied(to: notch) === notch,
+                     "session taps read a remote screen's scroll as it came")
+        HIDStage.shared.passes = true
+        Exceptions.shared.excepted = [.scrollDirection]
+        suite.expect(Inverter.directionApplied(to: notch) === notch,
+                     "session taps read the wheel unturned over an app excepted from Scroll Direction")
+        configure(invert: false)
+        suite.expect(Inverter.directionApplied(to: notch) === notch,
+                     "session taps read the wheel unturned while Scroll Direction is off")
     }
 
     private static func verticalLine(_ event: CGEvent) -> Int64 {

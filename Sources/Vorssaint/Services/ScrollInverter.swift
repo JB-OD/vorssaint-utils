@@ -34,8 +34,9 @@ final class ScrollInverter: ObservableObject {
 
     /// The wheel the way this tap would turn it, for this app's session taps:
     /// they run before this tap and consume the wheel, so it never comes here.
-    /// Only the flip, on a copy; anything that is not a mouse wheel, or sits
-    /// over an app excepted from Scroll Direction, comes back as it was.
+    /// Only the flip, on a copy; anything that is not a mouse wheel, came from
+    /// a remote screen or sits over an app excepted from Scroll Direction
+    /// comes back as it was.
     static func directionApplied(to event: CGEvent) -> CGEvent {
         let traits = ScrollWheelEventTraits(
             isContinuous: event.getIntegerValueField(.scrollWheelEventIsContinuous) != 0,
@@ -43,9 +44,10 @@ final class ScrollInverter: ObservableObject {
             scrollPhase: event.getIntegerValueField(.scrollWheelEventScrollPhase),
             scrollCount: event.getIntegerValueField(.scrollWheelEventScrollCount)
         )
-        let direction = ScrollDirectionPreferences(defaults: .standard)
+        let direction = ScrollDirectionPreferences(defaults: UserDefaults.standard)
         guard direction.invertVertical || direction.invertHorizontal,
               ScrollWheelSupport.isMouseWheel(traits, secondsSinceLastGesturePhase: nil),
+              ScrollWheelHIDStage.shared.passed(event),
               !MouseAppExceptions.shared.excludesPointerTarget(
                   .scrollDirection, at: event.location,
                   sourceProcessID: event.getIntegerValueField(.eventSourceUnixProcessID)),
@@ -115,6 +117,7 @@ final class ScrollInverter: ObservableObject {
     }
 
     private func start() {
+        ScrollWheelHIDStage.shared.setWatching(true, for: .wheelTap)
         if let port = tapStateLock.withLock({ tap }) {
             CGEvent.tapEnable(tap: port, enable: true)
             setSourceTracking(true)
@@ -136,6 +139,7 @@ final class ScrollInverter: ObservableObject {
         ) else {
             ScrollWheelTarget.shared.setEnabled(false)
             setSourceTracking(false)
+            ScrollWheelHIDStage.shared.setWatching(false, for: .wheelTap)
             isRunning = false
             // A create that fails during the session handoff gets one more look once the switch settles.
             guard !tapCreationRetryUsed else { return }
@@ -171,6 +175,7 @@ final class ScrollInverter: ObservableObject {
         tapCreationRetryWork = nil
         tapCreationRetryUsed = false
         setSourceTracking(false)
+        ScrollWheelHIDStage.shared.setWatching(false, for: .wheelTap)
         let (port, source) = tapStateLock.withLock { () -> (CFMachPort?, CFRunLoopSource?) in
             let current = (tap, runLoopSource)
             tap = nil
@@ -202,6 +207,12 @@ final class ScrollInverter: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
         guard type == .scrollWheel else { return Unmanaged.passUnretained(event) }
+        // A remote screen posts its scroll below the HID stage, already
+        // turned and paced the controlling computer's way, trackpad
+        // included. A HID tap never saw it, and neither does this one.
+        guard ScrollWheelHIDStage.shared.passed(event) else {
+            return Unmanaged.passUnretained(event)
+        }
         // Smooth scrolling swallows the wheel before this tap and already
         // turned its glide around, so flipping the glide here would cancel
         // that out and inverting would look broken while both are on. The

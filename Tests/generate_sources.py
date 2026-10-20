@@ -626,6 +626,8 @@ def main():
     write("LinearScrollTap.swift", "import CoreGraphics\nimport Foundation\nextension LinearScrollTapTests.Inverter {\n"
           + wheel_tap.replace("private func", "func", 1)
                      .replace("AppFeature.linearScroll.isAvailable", "AppFeature.linearScroll.isAvailable(in: defaults)")
+          + declaration("Sources/Vorssaint/Services/ScrollInverter.swift", "    static func directionApplied(to event:",
+                        scope="final class ScrollInverter:")
           + "}\n")
     smooth = "Sources/Vorssaint/Services/SmoothScrollService.swift"
     smooth_handler = declaration(smooth, "    private func handle(type:").replace("private func", "func", 1)

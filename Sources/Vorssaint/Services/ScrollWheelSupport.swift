@@ -77,6 +77,8 @@ enum ScrollWheelSupport {
     /// Both wheel taps share a stage and retain their head/tail ordering.
     /// At this stage the event has its target process and window, which a
     /// smooth glide must retain when posting directly to the receiving app.
+    /// It also sees remote screens' scroll, which both taps leave alone
+    /// (`ScrollWheelHIDStageLedger`).
     static let tapLocation: CGEventTapLocation = .cgAnnotatedSessionEventTap
 
     /// How long after a gesture-phased event a phaseless continuous event is
@@ -355,6 +357,47 @@ extension ScrollWheelSupport {
             event.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: horizontal.point)
             event.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: horizontal.fixedPoint)
         }
+    }
+}
+
+// MARK: - HID stage
+
+/// The wheel events that came in at the HID stage, told apart from those
+/// posted further down the event path.
+///
+/// Both wheel taps sit at the annotated stage, which also sees scroll posted
+/// at the session tap. That is where Screen Sharing, Apple Remote Desktop and
+/// VNC post the controlling computer's scrolling, trackpad included, as
+/// phaseless pixel events that read as a mouse wheel. Taps at the HID stage
+/// never saw them, so they were never turned, capped or smoothed here; the
+/// controlling computer already scrolled them its own way.
+///
+/// The HID tap notes each wheel event's timestamp, which the event keeps on
+/// its way down. Events overtake one another between the stages, so the last
+/// few hundred are kept rather than only the newest.
+struct ScrollWheelHIDStageLedger {
+    static let capacity = 256
+
+    /// False while no HID tap is noting anything. Every event then counts as
+    /// having come through, so a tap that could not be created leaves the
+    /// wheel features working for local input rather than off.
+    var isWatching = false
+    private var timestamps = [UInt64](repeating: 0, count: capacity)
+    private var next = 0
+
+    mutating func note(_ timestamp: UInt64) {
+        timestamps[next] = timestamp
+        next = (next + 1) % Self.capacity
+    }
+
+    func passed(_ timestamp: UInt64) -> Bool {
+        !isWatching || (timestamp != 0 && timestamps.contains(timestamp))
+    }
+
+    mutating func reset() {
+        isWatching = false
+        timestamps = [UInt64](repeating: 0, count: Self.capacity)
+        next = 0
     }
 }
 
