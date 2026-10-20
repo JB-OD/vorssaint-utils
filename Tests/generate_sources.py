@@ -628,6 +628,9 @@ def main():
                      .replace("AppFeature.linearScroll.isAvailable", "AppFeature.linearScroll.isAvailable(in: defaults)")
           + declaration("Sources/Vorssaint/Services/ScrollInverter.swift", "    static func directionApplied(to event:",
                         scope="final class ScrollInverter:")
+          + "}\nextension LinearScrollTapTests.SideWheel {\n"
+          + declaration("Sources/Vorssaint/Services/MouseButtons/MouseButtonShortcutService.swift",
+                        "    private func sideWheelInput(for event:").replace("private func", "func", 1)
           + "}\n")
     smooth = "Sources/Vorssaint/Services/SmoothScrollService.swift"
     smooth_handler = declaration(smooth, "    private func handle(type:").replace("private func", "func", 1)

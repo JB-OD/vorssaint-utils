@@ -31,6 +31,11 @@ enum LinearScrollTapTests {
         var passes = true
         func passed(_ event: CGEvent) -> Bool { passes }
     }
+    /// Mouse button shortcuts' side-wheel reader, extracted as shipped.
+    final class SideWheel {
+        typealias ScrollInverter = Inverter
+        var lastGesturePhaseTimestamp: UInt64?
+    }
     final class Inverter {
         typealias UserDefaults = StandardDefaults
         typealias MouseAppExceptions = Exceptions
@@ -57,13 +62,14 @@ enum LinearScrollTapTests {
             HIDStage.shared.passes = true
         }
         func configure(linear: Bool = true, installed: Bool = true, lines: Int = 3,
-                       invert: Bool = false, inverterInstalled: Bool = true,
+                       invert: Bool = false, invertHorizontal: Bool = false, inverterInstalled: Bool = true,
                        sidewaysKey: ScrollHorizontalModifier? = nil) {
             defaults.set(installed, forKey: AppFeature.linearScroll.availabilityKey)
             defaults.set(linear, forKey: DefaultsKey.linearScrollEnabled)
             defaults.set(lines, forKey: DefaultsKey.linearScrollLines)
             defaults.set(inverterInstalled, forKey: AppFeature.scrollInverter.availabilityKey)
             defaults.set(invert, forKey: DefaultsKey.scrollInverterEnabled)
+            defaults.set(invertHorizontal, forKey: DefaultsKey.scrollInverterHorizontalEnabled)
             defaults.set(sidewaysKey != nil, forKey: AppFeature.scrollHorizontal.availabilityKey)
             defaults.set(sidewaysKey != nil, forKey: DefaultsKey.scrollHorizontalEnabled)
             defaults.set(sidewaysKey?.rawValue, forKey: DefaultsKey.scrollHorizontalModifier)
@@ -206,6 +212,22 @@ enum LinearScrollTapTests {
         configure(invert: false)
         suite.expect(Inverter.directionApplied(to: notch) === notch,
                      "session taps read the wheel unturned while Scroll Direction is off")
+
+        // Scroll Direction turned the side wheel at the HID stage before
+        // Mouse button shortcuts saw it, so saved shortcuts hold the turned
+        // direction. A push AppKit calls left reads right while it is on.
+        let push = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 2,
+                           wheel1: 0, wheel2: 0, wheel3: 0)!
+        push.setIntegerValueField(.scrollWheelEventIsContinuous, value: 0)
+        push.setIntegerValueField(.scrollWheelEventDeltaAxis2, value: 1)
+        push.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2, value: 1)
+        push.setIntegerValueField(.scrollWheelEventPointDeltaAxis2, value: 10)
+        configure(invertHorizontal: true)
+        suite.expect(SideWheel().sideWheelInput(for: push) == MouseButtonShortcutSupport.sideWheelRightInput,
+                     "a side-wheel push reads the way horizontal Scroll Direction turns it, so saved shortcuts keep their direction")
+        configure()
+        suite.expect(SideWheel().sideWheelInput(for: push) == MouseButtonShortcutSupport.sideWheelLeftInput,
+                     "a side-wheel push reads as pushed while horizontal Scroll Direction is off")
     }
 
     private static func verticalLine(_ event: CGEvent) -> Int64 {

@@ -137,7 +137,11 @@ enum SmoothScrollRoutingTests {
         _ = tick(service, wheel(CGPoint(x: a.x + 6, y: a.y)))
         suite.expectClose(service.engine.remainingVertical, drifted + 80,
                           "a pointer drifting a few points between ticks keeps the glide it is extending")
-        _ = tick(service, wheel(CGPoint(x: a.x + 6 + SmoothScrollSupport.TargetLatch.driftTolerance + 1, y: a.y)))
+        let moving = service.engine.remainingVertical
+        _ = tick(service, wheel(CGPoint(x: a.x + 6, y: a.y + 20)))
+        suite.expectClose(service.engine.remainingVertical, moving + 40,
+                          "a pointer still moving while the wheel turns keeps the glide it is extending")
+        _ = tick(service, wheel(CGPoint(x: a.x + 6 + SmoothScrollSupport.TargetLatch.driftTolerance + 1, y: a.y + 20)))
         suite.expect(service.engine.remainingVertical == 40,
                      "a pointer that moved past the drift tolerance starts a new glide")
         _ = tick(service, wheel())
@@ -179,19 +183,38 @@ enum SmoothScrollRoutingTests {
                      "a remote screen's scroll passes through raw and leaves the local glide on its window")
         HIDStage.shared.passes = true
 
+        // An event stamped in mach ticks as the HID tap reads it on Apple
+        // Silicon, and the nanoseconds a session tap reports for it (#1689).
+        let appleSilicon = EventTimestamp.Timebase(numer: 125, denom: 3)
+        let hidTicks: UInt64 = 3_253_805_719_584, sessionNanoseconds: UInt64 = 135_575_238_316_000
+        let nowTicks = hidTicks + 24_000
         var ledger = ScrollWheelHIDStageLedger()
-        suite.expect(ledger.passed(12) && ledger.passed(0),
+        // Posted events carry their poster's process id; hardware carries 0.
+        func passed(_ raw: UInt64, source: Int64 = 77) -> Bool {
+            ledger.passed(raw, sourceProcessID: source, nowTicks: nowTicks, timebase: appleSilicon)
+        }
+        func note(_ raw: UInt64) { ledger.note(raw, nowTicks: nowTicks, timebase: appleSilicon) }
+        suite.expect(passed(sessionNanoseconds) && passed(0),
                      "with no HID tap watching, every wheel event counts as local")
         ledger.isWatching = true
-        ledger.note(12)
-        suite.expect(ledger.passed(12) && !ledger.passed(13) && !ledger.passed(0),
+        suite.expect(passed(sessionNanoseconds + 300_000, source: 0),
+                     "a hardware event counts as local whatever its timestamp reads, since it can only come in at the HID stage")
+        note(hidTicks)
+        suite.expect(passed(sessionNanoseconds),
+                     "an event noted in mach ticks at the HID stage is found by the nanoseconds the annotated stage reads")
+        let postedAtHID = sessionNanoseconds + 200_000
+        note(postedAtHID)
+        suite.expect(passed(postedAtHID),
+                     "an event posted at the HID stage, in nanoseconds at both stages, is found too")
+        suite.expect(!passed(sessionNanoseconds + 100_000) && !passed(0),
                      "while the HID tap watches, only events it noted count as local")
         let capacity = UInt64(ScrollWheelHIDStageLedger.capacity)
-        for timestamp in 100..<(100 + capacity) { ledger.note(timestamp) }
-        suite.expect(!ledger.passed(12) && ledger.passed(100) && ledger.passed(99 + capacity),
+        let later = sessionNanoseconds + 1_000_000
+        for index in 0..<capacity { note(later + index * 10_000) }
+        suite.expect(!passed(sessionNanoseconds) && passed(later) && passed(later + (capacity - 1) * 10_000),
                      "the HID stage ledger keeps the last \(capacity) events, oldest out first")
         ledger.reset()
-        suite.expect(ledger.passed(13), "a watch that was torn down counts every event as local again")
+        suite.expect(passed(sessionNanoseconds + 100_000), "a watch that was torn down counts every event as local again")
 
         for event in [wheel(pid: 0), wheel(window: 0)] {
             let unknown = Service()

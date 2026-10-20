@@ -372,11 +372,19 @@ extension ScrollWheelSupport {
 /// never saw them, so they were never turned, capped or smoothed here; the
 /// controlling computer already scrolled them its own way.
 ///
-/// The HID tap notes each wheel event's timestamp, which the event keeps on
-/// its way down. Events overtake one another between the stages, so the last
-/// few hundred are kept rather than only the newest.
+/// A hardware event carries source process id 0 and can only come in at the
+/// HID stage, so it always counts. A posted one counts when the HID tap noted
+/// its timestamp, which it keeps on its way down. Both readings are compared
+/// as nanoseconds: at the HID stage a hardware event reads in mach ticks, a
+/// posted one in nanoseconds (`EventTimestamp`, #1689). Events overtake one
+/// another between the stages, so the last few hundred are kept rather than
+/// only the newest.
 struct ScrollWheelHIDStageLedger {
     static let capacity = 256
+    /// A posted event reads the same at both stages; the slack only covers
+    /// a rounding the system might do differently, and is far below the
+    /// time between two wheel events.
+    static let tolerance: UInt64 = 1_000
 
     /// False while no HID tap is noting anything. Every event then counts as
     /// having come through, so a tap that could not be created leaves the
@@ -385,13 +393,22 @@ struct ScrollWheelHIDStageLedger {
     private var timestamps = [UInt64](repeating: 0, count: capacity)
     private var next = 0
 
-    mutating func note(_ timestamp: UInt64) {
-        timestamps[next] = timestamp
+    /// `raw` is the timestamp as the tap reads it, in either unit.
+    mutating func note(_ raw: UInt64, nowTicks: UInt64 = mach_absolute_time(),
+                       timebase: EventTimestamp.Timebase = EventTimestamp.machTimebase) {
+        timestamps[next] = EventTimestamp.nanoseconds(raw: raw, nowTicks: nowTicks, timebase: timebase)
         next = (next + 1) % Self.capacity
     }
 
-    func passed(_ timestamp: UInt64) -> Bool {
-        !isWatching || (timestamp != 0 && timestamps.contains(timestamp))
+    func passed(_ raw: UInt64, sourceProcessID: Int64, nowTicks: UInt64 = mach_absolute_time(),
+                timebase: EventTimestamp.Timebase = EventTimestamp.machTimebase) -> Bool {
+        guard isWatching else { return true }
+        guard sourceProcessID != 0 else { return true }
+        guard raw != 0 else { return false }
+        let nanoseconds = EventTimestamp.nanoseconds(raw: raw, nowTicks: nowTicks, timebase: timebase)
+        return timestamps.contains { noted in
+            noted != 0 && (noted >= nanoseconds ? noted - nanoseconds : nanoseconds - noted) <= Self.tolerance
+        }
     }
 
     mutating func reset() {

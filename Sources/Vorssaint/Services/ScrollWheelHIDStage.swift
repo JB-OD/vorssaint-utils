@@ -29,6 +29,8 @@ final class ScrollWheelHIDStage {
     private var clients = Set<Client>()
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    /// Main thread only, like `setWatching`.
+    private var creationRetryUsed = false
 
     private init() {}
 
@@ -36,12 +38,14 @@ final class ScrollWheelHIDStage {
     /// is watching, so the wheel features never go dead with this tap.
     func passed(_ event: CGEvent) -> Bool {
         let timestamp = event.timestamp
-        return lock.withLock { ledger.passed(timestamp) }
+        let sourceProcessID = event.getIntegerValueField(.eventSourceUnixProcessID)
+        return lock.withLock { ledger.passed(timestamp, sourceProcessID: sourceProcessID) }
     }
 
     /// Main thread. Each wheel tap asks for the watch while it runs; the tap
     /// goes back with the last one, and with them when the session switches
-    /// away. A failed create is tried again on the next request.
+    /// away. A failed create gets one more try half a second later, as the
+    /// wheel taps' own do, and again on the next request.
     func setWatching(_ wanted: Bool, for client: Client) {
         let (port, source) = lock.withLock { () -> (CFMachPort?, CFRunLoopSource?) in
             if wanted {
@@ -76,7 +80,19 @@ final class ScrollWheelHIDStage {
                 return Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else { return }
+        ) else {
+            // Without the watch remote scroll counts as local, so a create
+            // that failed during the session handoff gets another look once
+            // the switch settles.
+            guard !creationRetryUsed else { return }
+            creationRetryUsed = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, let client = self.lock.withLock({ self.clients.first }) else { return }
+                self.setWatching(true, for: client)
+            }
+            return
+        }
+        creationRetryUsed = false
         let createdSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, created, 0)
         lock.withLock {
             tap = created

@@ -484,9 +484,8 @@ final class MouseButtonShortcutService: ObservableObject {
     }
 
     /// Smooth scrolling, Scroll Direction and linear scrolling all run at the
-    /// annotated stage, after this session tap. A tick taken here never
-    /// reaches them, and the direction read here is the one the wheel turned,
-    /// however Scroll Direction would have turned it for the app.
+    /// annotated stage, after this session tap, so a tick taken here never
+    /// reaches them.
     private func handleSideWheel(_ event: CGEvent) -> Unmanaged<CGEvent>? {
         if AppSwitcher.shared.scrollNavigationActive {
             return Unmanaged.passUnretained(event)
@@ -537,17 +536,22 @@ final class MouseButtonShortcutService: ObservableObject {
         guard ScrollWheelSupport.isMouseWheel(
             traits,
             secondsSinceLastGesturePhase: secondsSinceGesturePhase) else { return nil }
+        // Scroll Direction's tap used to turn the wheel at the HID stage,
+        // ahead of this one, so the directions Settings recorded, and the
+        // ones that fired, are the turned ones. Reading the same here keeps
+        // every saved shortcut on the direction it had.
+        let wheel = ScrollInverter.directionApplied(to: event)
         return MouseButtonShortcutSupport.sideWheelInput(
             isContinuous: traits.isContinuous,
             vertical: (
-                line: Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis1)),
-                fixedPoint: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1),
-                point: Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
+                line: Double(wheel.getIntegerValueField(.scrollWheelEventDeltaAxis1)),
+                fixedPoint: wheel.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1),
+                point: Double(wheel.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
             ),
             horizontal: (
-                line: Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis2)),
-                fixedPoint: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2),
-                point: Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
+                line: Double(wheel.getIntegerValueField(.scrollWheelEventDeltaAxis2)),
+                fixedPoint: wheel.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2),
+                point: Double(wheel.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
             )
         )
     }
