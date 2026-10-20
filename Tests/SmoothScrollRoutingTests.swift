@@ -35,11 +35,6 @@ enum SmoothScrollRoutingTests {
     enum Capture {
         static func steppedLoupeNeedsRawWheel(optionPressed: Bool) -> Bool { false }
     }
-    enum Shortcuts {
-        static let hasActiveSideWheelInterest = false
-        static func claimsSideWheel<T>(_ input: T, at point: CGPoint, sourceProcessID: Int64,
-                                       eventTimestamp: UInt64) -> Bool { false }
-    }
     /// Whether the event came in at the HID stage; false stands for a remote
     /// screen's scroll, posted further down.
     final class HIDStage {
@@ -55,7 +50,6 @@ enum SmoothScrollRoutingTests {
         typealias ScrollWheelTarget = Target
         typealias SessionActivity = Session
         typealias ScreenshotSelectionController = Capture
-        typealias MouseButtonShortcutService = Shortcuts
         typealias ScrollWheelHIDStage = HIDStage
         // Test events carry the harness pid; the real service rejects its own.
         static let ownProcessID: Int64 = -1

@@ -247,28 +247,6 @@ final class SmoothScrollService: ObservableObject {
             stopGlide()
             return Unmanaged.passUnretained(event)
         }
-        if MouseButtonShortcutService.hasActiveSideWheelInterest,
-           let input = MouseButtonShortcutSupport.sideWheelInput(
-            isContinuous: traits.isContinuous,
-            vertical: (
-                line: Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis1)),
-                fixedPoint: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1),
-                point: Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
-            ),
-            horizontal: (
-                line: Double(event.getIntegerValueField(.scrollWheelEventDeltaAxis2)),
-                fixedPoint: event.getDoubleValueField(.scrollWheelEventFixedPtDeltaAxis2),
-                point: Double(event.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
-            )),
-           MouseButtonShortcutService.claimsSideWheel(
-               input,
-               at: event.location,
-               sourceProcessID: sourceProcessID,
-               eventTimestamp: timestamp
-           ) {
-            stopGlide()
-            return Unmanaged.passUnretained(event)
-        }
         // Apps on this feature's exception list get their wheel raw: the
         // glide would arrive as a much longer move inside apps that read the
         // wheel themselves (issue #358).
